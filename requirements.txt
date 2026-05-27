@@ -1,2 +1,2 @@
 streamlit
-nest_asyncio
+openpyxl
