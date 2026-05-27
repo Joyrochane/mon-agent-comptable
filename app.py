@@ -1,135 +1,142 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import datetime
 
-class FinancialAnalyticsAgent:
+class CreancesAnalyticsAgent:
     def __init__(self):
-        self.agent_name = "SmartCompta-Analytics"
+        self.agent_name = "SmartCreances-Auditor"
 
-    def analyser_donnees(self, df_depenses, df_revenus, taux_tva):
-        # 1. Calculs Comptables Standards
-        df_dep_calc = df_depenses.copy()
-        df_dep_calc['TVA (SAR)'] = df_dep_calc['Montant HT (SAR)'] * (taux_tva / 100)
-        df_dep_calc['Total TTC (SAR)'] = df_dep_calc['Montant HT (SAR)'] + df_dep_calc['TVA (SAR)']
+    def analyser_creances(self, df):
+        df_calc = df.copy()
         
-        total_depenses_ht = df_dep_calc['Montant HT (SAR)'].sum()
-        total_tva_depenses = df_dep_calc['TVA (SAR)'].sum()
-        total_revenus_ht = df_revenus['Montant HT (SAR)'].sum()
+        # Standardisation des colonnes (Gestion des synonymes)
+        for col in df_calc.columns:
+            if col.lower() in ['client', 'nom', 'customer', 'raison sociale']:
+                df_calc.rename(columns={col: 'Client'}, inplace=True)
+            if col.lower() in ['montant', 'montant dû', 'creance', 'amount', 'solde']:
+                df_calc.rename(columns={col: 'Montant Dû (SAR)'}, inplace=True)
+            if col.lower() in ['date', 'echeance', 'date d\'échéance', 'due date']:
+                df_calc.rename(columns={col: 'Date d\'Échéance'}, inplace=True)
+
+        # Vérification des colonnes critiques
+        if 'Client' not in df_calc.columns: df_calc['Client'] = "Inconnu"
+        if 'Montant Dû (SAR)' not in df_calc.columns: df_calc['Montant Dû (SAR)'] = 0.0
         
-        # 2. Analyse Financière (Indicateurs Clés)
-        resultat_net_ht = total_revenus_ht - total_depenses_ht
-        marge_beneficiaire = (resultat_net_ht / total_revenus_ht * 100) if total_revenus_ht > 0 else 0.0
-        ratio_depense_revenu = (total_depenses_ht / total_revenus_ht * 100) if total_revenus_ht > 0 else 0.0
+        # Nettoyage numérique
+        df_calc['Montant Dû (SAR)'] = pd.to_numeric(df_calc['Montant Dû (SAR)'], errors='coerce').fillna(0.0)
         
-        # 3. Analyse de Données (Statistiques & Audit)
-        alerte_anomalie = ""
-        if len(df_dep_calc) > 0:
-            moyenne_depenses = df_dep_calc['Montant HT (SAR)'].mean()
-            # Détection d'anomalie : dépense supérieure à 2x la moyenne des autres dépenses
-            depenses_hautes = df_dep_calc[df_dep_calc['Montant HT (SAR)'] > (moyenne_depenses * 1.8)]
-            if not depenses_hautes.empty:
-                categories_alert = ", ".join(depenses_hautes['Catégorie'].tolist())
-                alerte_anomalie = f"⚠️ [ANOMALIE DE DONNÉES DETECTÉE] : Les catégories suivantes ({categories_alert}) ont des montants anormalement élevés par rapport à la moyenne de vos coûts."
+        # Calcul du retard si la date d'échéance existe
+        today = datetime.date.today()
+        if 'Date d\'Échéance' in df_calc.columns:
+            df_calc['Date d\'Échéance'] = pd.to_datetime(df_calc['Date d\'Échéance'], errors='coerce').dt.date
+            df_calc['Jours de Retard'] = df_calc['Date d\'Échéance'].apply(
+                lambda x: (today - x).days if isinstance(x, datetime.date) and x < today else 0
+            )
+        else:
+            df_calc['Jours de Retard'] = 0
+
+        # Catégorisation du risque
+        def evaluer_risque(jours):
+            if jours == 0: return "1. À jour (Sain)"
+            elif jours <= 30: return "2. Risque Faible (1-30j)"
+            elif jours <= 90: return "3. Risque Modéré (31-90j)"
+            else: return "4. Risque Critique (>90j)"
+            
+        df_calc['Statut Risque'] = df_calc['Jours de Retard'].apply(evaluer_risque)
         
-        # Génération du rapport d'audit analytique
+        # Indicateurs globaux
+        total_creances = df_calc['Montant Dû (SAR)'].sum()
+        total_retard = df_calc[df_calc['Jours de Retard'] > 0]['Montant Dû (SAR)'].sum()
+        top_debiteur = df_calc.sort_values(by='Montant Dû (SAR)', ascending=False).iloc[0]['Client'] if len(df_calc) > 0 else "Aucun"
+
+        # Génération du rapport d'audit et du Workflow
         rapport_txt = f"""
 ============================================================
-             RAPPORT D'ANALYSE FINANCIÈRE & AUDIT             
+           AUDIT DES CRÉANCES CLIENTS & WORKFLOW AI         
 ============================================================
-Agent Analyste    : {self.agent_name}
-Mode Opérationnel : Audit Statistique & Financier
+Agent d'Audit     : {self.agent_name}
+Date de l'Analyse : {today.strftime('%d/%m/%Y')}
+Statut du Portefeuille : {"⚠️ ALERTE LIQUIDITÉ" if total_retard > (total_creances * 0.5) else "✅ SAIN"}
 
-1. INDICES DE PERFORMANCE FINANCIÈRE :
+1. DIAGNOSTIC DU PORTEFEUILLE DE CRÉANCES :
 ------------------------------------------------------------
-- Chiffre d'Affaires Global (HT) : {total_revenus_ht:,.2f} SAR
-- Total des Charges Opérat. (HT) : {total_depenses_ht:,.2f} SAR
-- Résultat Net Estimé (HT)       : {resultat_net_ht:,.2f} SAR
-- Marge Bénéficiaire Net         : {marge_beneficiaire:.2f} %
-- Ratio Charges / Revenus        : {ratio_depense_revenu:.2f} %
+- Encours Client Global      : {total_creances:,.2f} SAR
+- Total des Sommes En Retard : {total_retard:,.2f} SAR
+- Taux d'Impayés / Retards   : {(total_retard/total_creances*100) if total_creances > 0 else 0:.1f} %
+- Plus Grand Débiteur        : {top_debiteur}
 
-2. AUDIT ET ANALYSE STATISTIQUE DES DONNÉES :
+2. WORKFLOW RECOMMANDÉ DE RECOUVREMENT :
 ------------------------------------------------------------
-- Nombre total de transactions   : {len(df_dep_calc) + len(df_revenus)}
-- Coût Moyen par Poste           : {df_dep_calc['Montant HT (SAR)'].mean():,.2f} SAR
-- Écart-Type des Dépenses        : {df_dep_calc['Montant HT (SAR)'].std():,.2f} SAR
-
-{alerte_anomalie if alerte_anomalie else "✅ [RAS] : La distribution de vos dépenses est statistiquement équilibrée."}
-
-NOTE STRATÉGIQUE :
-{"Attention, votre structure de coûts consomme une trop grande part de vos revenus." if ratio_depense_revenu > 70 else "Votre santé financière est excellente. Vos charges sont bien maîtrisées."}
+[ÉTAPE 1] 🟢 CRÉANCES SAINES (Échéance non dépassée) :
+ -> Action : Envoi automatique d'un relevé de compte de courtoisie 5 jours avant l'échéance.
+ 
+[ÉTAPE 2] 🟡 RETARD 1-30 JOURS (Risque Faible) :
+ -> Action : Relance par Email n°1 amicale + appel téléphonique de suivi par le service comptable.
+ 
+[ÉTAPE 3] 🟠 RETARD 31-90 JOURS (Risque Modéré) :
+ -> Action : Envoi d'une lettre de mise en demeure formelle en recommandé. Suspension des encours.
+ 
+[ÉTAPE 4] 🔴 RETARD >90 JOURS (Risque Critique) :
+ -> Action : Transfert immédiat du dossier au service contentieux ou à une société de recouvrement.
 ============================================================
 """
-        return df_dep_calc, rapport_txt, total_revenus_ht, total_depenses_ht, resultat_net_ht, marge_beneficiaire
+        return df_calc, rapport_txt, total_creances, total_retard, top_debiteur
 
-# --- INTERFACE DE L'APPLICATION (MODE WIDE) ---
-st.set_page_config(page_title="AI Financial Analytics", page_icon="📈", layout="wide")
+# --- INTERFACE ---
+st.set_page_config(page_title="AI Customer Receivables", page_icon="🏦", layout="wide")
+st.title("🏦 AI Customer Receivables & Recovery Workflow Agent")
+st.write("Déposez votre fichier Excel pour extraire les données, générer les graphiques de risque et le workflow.")
 
-st.title("📈 AI Accounting & Financial Analytics Agent")
-st.write("Plateforme d'aide à la décision : Analyse de données comptables et indicateurs de performance.")
+# Bouton d'importation hybride Excel / CSV
+fichier = st.file_uploader("Importer le fichier des créances clients (Format .xlsx ou .csv)", type=["xlsx", "csv"])
 
-# Initialisation des données de simulation
-if 'init' not in st.session_state:
-    st.session_state.df_rev = pd.DataFrame({"Source de Revenu": ["Ventes Boutique", "Abonnements SaaS", "Prestations de Service"], "Montant HT (SAR)": [12000.0, 8500.0, 4500.0]})
-    st.session_state.df_dep = pd.DataFrame({"Catégorie": ["Logistique", "Marketing & Pub", "Salaires", "Hébergement IT"], "Montant HT (SAR)": [1500.0, 7800.0, 8500.0, 1200.0]})
-    st.session_state.init = True
-
-# Organisation de la saisie sur deux colonnes
-col_rev, col_dep = st.columns(2)
-
-with col_rev:
-    st.subheader("💰 1. Registre des Revenus (HT)")
-    df_rev_edite = st.data_editor(st.session_state.df_rev, num_rows="dynamic", use_container_width=True, key="rev_edit")
-
-with col_dep:
-    st.subheader("💸 2. Registre des Dépenses (HT)")
-    df_dep_edite = st.data_editor(st.session_state.df_dep, num_rows="dynamic", use_container_width=True, key="dep_edit")
-
-taux_global = st.slider("Configuration - Taux de TVA Fiscal (%)", min_value=0.0, max_value=100.0, value=15.0, step=0.5)
-
-# --- BLOC ANALYTIQUE ---
-if st.button("🚀 Exécuter l'Analyse Financière & Dataviz"):
-    agent = FinancialAnalyticsAgent()
-    
-    # Traitement des données par l'agent
-    df_dep_res, rapport, tot_rev, tot_dep, net, marge = agent.analyser_donnees(df_dep_edite, df_rev_edite, taux_global)
-    
-    st.divider()
-    st.header("🎯 Tableau de Bord Analytique")
-    
-    # KPIs financiers
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric(label="Chiffre d'Affaires", value=f"{tot_rev:,.2f} SAR")
-    kpi2.metric(label="Total Dépenses HT", value=f"{tot_dep:,.2f} SAR")
-    kpi3.metric(label="Bénéfice Net (HT)", value=f"{net:,.2f} SAR", delta=f"{marge:.1f}% Marge")
-    kpi4.metric(label="TVA sur Dépenses", value=f"{df_dep_res['TVA (SAR)'].sum():,.2f} SAR")
-    
-    # Section Graphiques (Analyse visuelle des données)
-    st.subheader("📊 Visualisation & Répartition des Flux")
-    col_g1, col_g2 = st.columns(2)
-    
-    with col_g1:
-        st.write("**Répartition des Dépenses Opérationnelles (SAR)**")
-        st.bar_chart(data=df_dep_res, x="Catégorie", y="Montant HT (SAR)", color="#FF4B4B")
+if fichier is not None:
+    try:
+        # Lecture automatique du format
+        if fichier.name.endswith('.xlsx'):
+            df_input = pd.read_excel(fichier)
+        else:
+            df_input = pd.read_csv(fichier)
+            
+        st.success("✅ Fichier chargé avec succès ! Analyse en cours...")
         
-    with col_g2:
-        st.write("**Comparatif Global : Revenus vs Dépenses (SAR)**")
-        df_compare = pd.DataFrame({
-            'Flux Financier': ['Total Revenus', 'Total Dépenses'],
-            'Montant (SAR)': [tot_rev, tot_dep]
-        })
-        st.bar_chart(data=df_compare, x="Flux Financier", y="Montant (SAR)", color="#29B5E8")
+        agent = CreancesAnalyticsAgent()
+        df_res, rapport, total_c, total_r, top_d = agent.analyser_creances(df_input)
         
-    # Section Rapport d'Audit écrit
-    st.subheader("📋 Rapport d'Audit Textuel")
-    st.text_area(label="", value=rapport, height=320)
-    
-    st.download_button(
-        label="💾 Exporter le rapport d'analyse (.txt)",
-        data=rapport,
-        file_name="rapport_analyse_financiere.txt",
-        mime="text/plain"
-    )
-    
-    # Affichage de la table de données enrichie
-    st.subheader("🔍 Données comptables consolidées (Dépenses)")
-    st.dataframe(df_dep_res, use_container_width=True)
+        st.divider()
+        
+        # KPIs
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Encours Total Clients", f"{total_c:,.2f} SAR")
+        k2.metric("Total en Retard de Paiement", f"{total_r:,.2f} SAR", delta=f"{(total_r/total_c*100) if total_c > 0 else 0:.1f}% du total", delta_color="inverse")
+        k3.metric("Principal Débiteur", str(top_d))
+        
+        # Graphiques
+        st.subheader("📊 Graphiques et Répartition du Risque")
+        g1, g2 = st.columns(2)
+        
+        with g1:
+            st.write("**Volume des créances par niveau de risque (SAR)**")
+            # Groupement par statut de risque pour le graphique
+            df_chart = df_res.groupby('Statut Risque')['Montant Dû (SAR)'].sum().reset_index()
+            st.bar_chart(data=df_chart, x="Statut Risque", y="Montant Dû (SAR)", color="#FF4B4B")
+            
+        with g2:
+            st.write("**Top 10 des clients par encours (SAR)**")
+            df_top10 = df_res.sort_values(by='Montant Dû (SAR)', ascending=False).head(10)
+            st.bar_chart(data=df_top10, x="Client", y="Montant Dû (SAR)", color="#29B5E8")
+            
+        # Rapport & Workflow
+        st.subheader("📋 Rapport d'Audit & Workflow de Recouvrement")
+        st.text_area("", value=rapport, height=400)
+        
+        # Téléchargement
+        st.download_button("💾 Exporter le Rapport & Workflow (TXT)", data=rapport, file_name="workflow_recouvrement.txt")
+        
+        st.subheader("🔍 Table des données extraites et qualifiées")
+        st.dataframe(df_res, use_container_width=True)
+        
+    except Exception as e:
+        st.error(f"Erreur lors de l'extraction des données : {e}. Assurez-vous que le fichier contient des entêtes lisibles.")
+else:
+    st.info("💡 En attente de votre fichier. Veuillez glisser-déposer votre document Excel ci-dessus pour lancer l'agent.")
