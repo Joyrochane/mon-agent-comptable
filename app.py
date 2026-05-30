@@ -10,7 +10,6 @@ class MultiSheetReceivablesAgent:
         liste_df_nettoyes = []
         today_pandas = pd.Timestamp.now().normalize()
 
-        # On ne parcourt QUE les feuilles validées par l'utilisateur
         for nom_feuille in feuilles_selectionnees:
             df_feuille = dict_dfs[nom_feuille]
             if df_feuille.empty:
@@ -92,46 +91,42 @@ SYNTHÈSE DU PORTFEUILLE CLIENTS COCHÉ :
 """
         return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j
 
-def main():
-    st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
-    st.title("🏦 AI Corporate Receivables & Financial Audit Dashboard")
-    st.write("Contrôle absolu : Sélectionnez manuellement les feuilles à inclure pour éliminer les doublons.")
+# --- DÉBUTER L'INTERFACE ---
+st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
+st.title("🏦 AI Corporate Receivables & Financial Audit Dashboard")
+st.write("Contrôle absolu : Sélectionnez manuellement les feuilles à inclure pour éliminer les doublons.")
 
-    fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
+fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
 
-    if fichier is not None:
-        try:
-            dict_onglets = pd.read_excel(fichier, sheet_name=None)
-            toutes_les_feuilles = list(dict_onglets.keys())
-            
-            st.divider()
-            st.subheader("⚙️ Configuration du périmètre de consolidation")
-            st.info("Cochez uniquement les fiches clients individuelles. Décochez la feuille récapitulative ou globale.")
-            
-            # Filtre de pré-sélection intelligent
-            mots_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
-            suggestions = [
-                f for i, f in enumerate(toutes_les_feuilles) 
-                if i != 0 and not any(m in str(f).lower() for m in mots_globaux)
-            ]
-            
-            feuilles_selectionnees = st.multiselect(
-                "Feuilles à inclure dans le calcul du Chiffre d'Affaires :",
-                options=toutes_les_feuilles,
-                default=suggestions
-            )
-            
-            if not feuilles_selectionnees:
-                st.warning("⚠️ Veuillez sélectionner au moins une feuille client pour lancer l'analyse.")
-                return
-
-            agent = MultiSheetReceivablesAgent()
-            df_analyse, rapport_txt, ca, recov, creance, critique = agent.consolider_et_analyser(dict_onglets, feuilles_selectionnees)
-            
-            if df_analyse.empty:
-                st.error("Les données analysées sont vides.")
-                return
-
+if fichier is not None:
+    # Lecture brute initiale sans try/except imbriqué pour la sécurité structurelle
+    dict_onglets = pd.read_excel(fichier, sheet_name=None)
+    toutes_les_feuilles = list(dict_onglets.keys())
+    
+    st.divider()
+    st.subheader("⚙️ Configuration du périmètre de consolidation")
+    st.info("Cochez uniquement les fiches clients individuelles. Décochez la feuille récapitulative ou globale.")
+    
+    # Pré-sélection intelligente
+    mots_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
+    suggestions = [
+        f for i, f in enumerate(toutes_les_feuilles) 
+        if i != 0 and not any(m in str(f).lower() for m in mots_globaux)
+    ]
+    
+    feuilles_selectionnees = st.multiselect(
+        "Feuilles à inclure dans le calcul du Chiffre d'Affaires :",
+        options=toutes_les_feuilles,
+        default=suggestions
+    )
+    
+    if not feuilles_selectionnees:
+        st.warning("⚠️ Veuillez sélectionner au moins une feuille client pour lancer l'analyse.")
+    else:
+        agent = MultiSheetReceivablesAgent()
+        df_analyse, rapport_txt, ca, recov, creance, critique = agent.consolider_et_analyser(dict_onglets, feuilles_selectionnees)
+        
+        if not df_analyse.empty:
             st.divider()
             
             # 1. KPIs
@@ -154,7 +149,6 @@ def main():
                 df_top_ca = df_top_ca.sort_values(by='Chiffre d\'Affaires', ascending=False)
                 st.bar_chart(data=df_top_ca.head(10), x="Client", y="Chiffre d\'Affaires", color="#29B5E8")
                 
-                # --- NOUVELLE INCLUSION : ÉTAT DES MEILLEURS CLIENTS ---
                 st.write("**Classement détaillé des performances clients :**")
                 df_top_ca_formatted = df_top_ca.copy()
                 df_top_ca_formatted['Chiffre d\'Affaires'] = df_top_ca_formatted['Chiffre d\'Affaires'].map('{:,.2f} DA'.format)
@@ -166,7 +160,6 @@ def main():
                 df_creance_top = df_creance_client.sort_values(by='Créance Totale', ascending=False)
                 st.bar_chart(data=df_creance_top.head(10), x="Client", y="Créance Totale", color="#FF4B4B")
                 
-                # Tableau des encours pour équilibrer la vue visuelle
                 st.write("**Détail des encours restants dus par client :**")
                 df_creance_top_formatted = df_creance_top.copy()
                 df_creance_top_formatted['Créance Totale'] = df_creance_top_formatted['Créance Totale'].map('{:,.2f} DA'.format)
@@ -179,7 +172,7 @@ def main():
             
             with col_t1:
                 st.subheader("📋 Rapport d'Audit Modulaire")
-                st.text_area("", value=rapport_txt, height=350)
+                st.text_area("", value=rapport_txt, height=350, key="txt_rep")
                 st.download_button("💾 Exporter le Rapport Complet", data=rapport_txt, file_name="Rapport_Audit_Consolide.txt")
                 
             with col_t2:
@@ -188,3 +181,7 @@ def main():
                 df_affichage['Date Échéance'] = df_affichage['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
                 
                 df_retard_90j = df_affichage[df_affichage['Créance > 3 Mois'] > 0][['Client', 'Source (Onglet)', 'Date Échéance', 'Jours de Retard', 'Créance > 3 Mois']]
+                if not df_retard_90j.empty:
+                    st.warning(f"L'agent a isolé {len(df_retard_90j)} lignes en alerte critique.")
+                    df_retard_90j_formatted = df_retard_90j.copy()
+                    df_retard_90j_formatted['Créance > 3 Mois'] = df_retard_90j_formatted['Créance > 3 Mois'].map('{:,.2f} DA'.format)
