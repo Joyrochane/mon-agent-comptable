@@ -8,11 +8,16 @@ class MultiSheetReceivablesAgent:
 
     def consolider_et_analyser(self, dict_dfs):
         liste_df_nettoyes = []
-        
-        # Utilisation du format standardisé Pandas pour la date du jour (Pas de conflit de type)
         today_pandas = pd.Timestamp.now().normalize()
 
+        # ÉTAPE CLÉ : Identifier le nom de la première feuille pour l'ignorer
+        nom_premiere_feuille = list(dict_dfs.keys())[0] if dict_dfs else None
+
         for nom_feuille, df_feuille in dict_dfs.items():
+            # Si c'est la première feuille, on passe à la suivante sans la lire
+            if nom_feuille == nom_premiere_feuille:
+                continue
+                
             if df_feuille.empty:
                 continue
                 
@@ -44,24 +49,16 @@ class MultiSheetReceivablesAgent:
             df_calc['Créance Totale'] = df_calc['Chiffre d\'Affaires'] - df_calc['Montant Recouvré']
             df_calc['Créance Totale'] = df_calc['Créance Totale'].apply(lambda x: x if x > 0 else 0.0)
 
-            # --- CORRECTION STRICTE DU BUG NaT ---
+            # Gestion des dates (Correctif NaT)
             if 'Date Échéance' in df_calc.columns:
-                # 1. Conversion forcée au format Datetime propre à Pandas (Gère les NaT proprement)
                 df_calc['Date Échéance'] = pd.to_datetime(df_calc['Date Échéance'], errors='coerce')
-                
-                # 2. Calcul vectoriel rapide (Pandas sait soustraire des colonnes contenant des NaT sans planter)
-                # On calcule la différence uniquement pour les lignes qui ne sont pas vides (notnull)
                 df_calc['Jours de Retard'] = 0
                 masque_valide = df_calc['Date Échéance'].notnull()
-                
-                # Soustraction et extraction du nombre de jours
                 retards = (today_pandas - df_calc.loc[masque_valide, 'Date Échéance']).dt.days
-                # On ne garde que les retards positifs (échéances dépassées)
                 df_calc.loc[masque_valide, 'Jours de Retard'] = retards.apply(lambda x: x if x > 0 else 0)
             else:
                 df_calc['Date Échéance'] = today_pandas
                 df_calc['Jours de Retard'] = 0
-            # ----------------------------------------------------
 
             df_calc['Créance > 3 Mois'] = np.where(df_calc['Jours de Retard'] > 90, df_calc['Créance Totale'], 0.0)
             df_calc['Source (Onglet)'] = nom_feuille
@@ -85,7 +82,7 @@ class MultiSheetReceivablesAgent:
       RAPPORT D'AUDIT FINANCIER CONSOLIDÉ (MULTI-ONGLETS)
 ============================================================
 Agent Auditeur    : {self.agent_name}
-Nombre d'onglets  : {len(dict_dfs)} feuilles analysées
+Nombre d'onglets  : {len(dict_dfs) - 1} feuilles analysées (Feuille 1 ignorée)
 Date d'exécution  : {today_pandas.strftime('%d/%m/%Y')}
 Statut Risque     : {"🔴 ALERTE LIQUIDITÉ CRITIQUE" if total_critique_90j > (total_creances * 0.25) else "🟢 RECOUVREMENT SOUS CONTRÔLE"}
 
@@ -103,17 +100,20 @@ Les créances de plus de 3 mois représentent { (total_critique_90j/total_creanc
 """
         return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j
 
-# --- INTERFACE GRAPHRIQUE ---
+# --- INTERFACE GRAPHIQUE ---
 st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
 st.title("🏦 AI Multi-Sheet Accounting & Receivables Dashboard")
-st.write("Analyse consolidée multi-onglets avec nettoyage automatique des lignes de date vides.")
+st.write("Analyse consolidée. **Note : La première feuille de calcul de votre fichier Excel est automatiquement ignorée.**")
 
 fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
 
 if fichier is not None:
     try:
         dict_onglets = pd.read_excel(fichier, sheet_name=None)
-        st.success(f"✅ Fichier détecté ! {len(dict_onglets)} feuilles de calcul importées.")
+        
+        # Message d'accueil indiquant l'onglet ignoré
+        nom_premier = list(dict_onglets.keys())[0] if dict_onglets else ""
+        st.success(f"✅ Fichier détecté ! {len(dict_onglets)} feuilles trouvées. L'onglet '{nom_premier}' sera ignoré.")
         
         agent = MultiSheetReceivablesAgent()
         df_analyse, rapport_txt, ca, recov, creance, critique = agent.consolider_et_analyser(dict_onglets)
@@ -159,7 +159,6 @@ if fichier is not None:
                 
             with col_t2:
                 st.subheader("🚨 Focus : Créances de plus de 3 mois (>90j)")
-                # Pour l'affichage, on repasse la colonne de date en texte propre pour enlever le format horaire h:m:s
                 df_affichage = df_analyse.copy()
                 df_affichage['Date Échéance'] = df_affichage['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
                 
@@ -171,7 +170,6 @@ if fichier is not None:
                     st.success("✅ Aucune ligne ne dépasse les 3 mois d'ancienneté.")
 
             st.subheader("🔍 Base de Données Consolidée")
-            # Nettoyage visuel de la table globale
             df_global_view = df_analyse.copy()
             df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
             st.dataframe(df_global_view, use_container_width=True)
