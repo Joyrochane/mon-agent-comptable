@@ -6,28 +6,14 @@ class MultiSheetReceivablesAgent:
     def __init__(self):
         self.agent_name = "SmartAudit-Consolidated"
 
-    def consolider_et_analyser(self, dict_dfs):
+    def consolider_et_analyser(self, dict_dfs, feuilles_selectionnees):
         liste_df_nettoyes = []
         today_pandas = pd.Timestamp.now().normalize()
 
-        # Identifier le nom de la première feuille pour l'ignorer
-        nom_premiere_feuille = list(dict_dfs.keys()) if dict_dfs else None
-        onglets_ignores = []
-
-        for nom_feuille, df_feuille in dict_dfs.items():
-            nom_clean = str(nom_feuille).lower().strip()
+        # On ne parcourt QUE les feuilles validées par l'utilisateur
+        for nom_feuille in feuilles_selectionnees:
+            df_feuille = dict_dfs[nom_feuille]
             
-            # 1. Ignorer la première feuille (Sommaire/Index)
-            if nom_feuille == nom_premiere_feuille:
-                onglets_ignores.append(f"{nom_feuille} (Première feuille)")
-                continue
-                
-            # 2. SECOURS ANTI-DOUBLE : Ignorer l'état global / récapitulatif
-            mots_cles_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
-            if any(mot in nom_clean for mot in mots_cles_globaux):
-                onglets_ignores.append(f"{nom_feuille} (État Global détecté)")
-                continue
-                
             if df_feuille.empty:
                 continue
                 
@@ -59,7 +45,7 @@ class MultiSheetReceivablesAgent:
             df_calc['Créance Totale'] = df_calc['Chiffre d\'Affaires'] - df_calc['Montant Recouvré']
             df_calc['Créance Totale'] = df_calc['Créance Totale'].apply(lambda x: x if x > 0 else 0.0)
 
-            # Gestion des dates (Correctif NaT)
+            # Gestion des dates
             if 'Date Échéance' in df_calc.columns:
                 df_calc['Date Échéance'] = pd.to_datetime(df_calc['Date Échéance'], errors='coerce')
                 df_calc['Jours de Retard'] = 0
@@ -76,7 +62,7 @@ class MultiSheetReceivablesAgent:
             liste_df_nettoyes.append(df_calc)
 
         if not liste_df_nettoyes:
-            return pd.DataFrame(), "", 0, 0, 0, 0, onglets_ignores
+            return pd.DataFrame(), "", 0, 0, 0, 0
 
         df_total = pd.concat(liste_df_nettoyes, ignore_index=True)
 
@@ -89,102 +75,114 @@ class MultiSheetReceivablesAgent:
 
         rapport = f"""
 ============================================================
-      RAPPORT D'AUDIT FINANCIER CONSOLIDÉ (FEUILLES CLIENTS)
+      RAPPORT D'AUDIT FINANCIER CONSOLIDÉ SUR SÉLECTION
 ============================================================
 Agent Auditeur    : {self.agent_name}
-Nombre d'onglets  : {len(liste_df_nettoyes)} feuilles clients analysées
-Feuilles ignorées : {", ".join(onglets_ignores)}
+Nombre d'onglets  : {len(liste_df_nettoyes)} feuilles comptabilisées
 Date d'exécution  : {today_pandas.strftime('%d/%m/%Y')}
 Statut Risque     : {"🔴 ALERTE LIQUIDITÉ CRITIQUE" if total_critique_90j > (total_creances * 0.25) else "🟢 RECOUVREMENT SOUS CONTRÔLE"}
 
-SYNTHÈSE DE TOUS LES ÉTATS CLIENTS :
+SYNTHÈSE DU PORTFEUILLE CLIENTS COCHÉ :
 ------------------------------------------------------------
-- Chiffre d'Affaires Cumulé (HT)  : {total_ca:,.2f} SAR
-- Total Encaissé / Recouvré       : {total_recouvrement:,.2f} SAR
+- Chiffre d'Affaires Cumulé (HT)  : {total_ca:,.2f} DA
+- Total Encaissé / Recouvré       : {total_recouvrement:,.2f} DA
 - Taux de Recouvrement Global     : {taux_recouvrement:.2f} %
-- Encours Total des Créances      : {total_creances:,.2f} SAR
-- Créances Critiques (> 3 mois)   : {total_critique_90j:,.2f} SAR
-
-NOTE ANALYTIQUE :
-Les doublons d'états généraux ont été purgés. Les calculs ci-dessus 
-reflètent uniquement l'addition stricte des fiches clients individuelles.
+- Encours Total des Créances      : {total_creances:,.2f} DA
+- Créances Critiques (> 3 mois)   : {total_critique_90j:,.2f} DA
 ============================================================
 """
-        return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j, onglets_ignores
+        return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j
 
 # --- INTERFACE GRAPHIQUE ---
 st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
-st.title("🏦 AI Multi-Sheet Accounting & Receivables Dashboard")
-st.write("Analyse consolidée des fiches clients sans doublons.")
+st.title("🏦 AI Corporate Receivables & Financial Audit Dashboard")
+st.write("Contrôle absolu : Sélectionnez manuellement les feuilles à inclure pour éliminer les doublons.")
 
 fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
 
 if fichier is not None:
     try:
+        # 1. Lecture brute de toutes les feuilles
         dict_onglets = pd.read_excel(fichier, sheet_name=None)
+        toutes_les_feuilles = list(dict_onglets.keys())
         
-        agent = MultiSheetReceivablesAgent()
-        df_analyse, rapport_txt, ca, recov, creance, critique, ignores = agent.consolider_et_analyser(dict_onglets)
+        st.divider()
+        st.subheader("⚙️ Configuration du périmètre de consolidation")
+        st.info("Cochez uniquement les fiches clients individuelles. Décochez la feuille récapitulative ou globale.")
         
-        st.warning(f"🚫 Feuilles exclues de l'analyse : {', '.join(ignores)}")
-        st.success(f"✅ Analyse finalisée sur les {len(dict_onglets) - len(ignores)} fiches clients.")
+        # Filtre de pré-sélection intelligent pour aider l'utilisateur (décoche automatiquement la première feuille et les mots "total")
+        mots_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
+        suggestions = [
+            f for i, f in enumerate(toutes_les_feuilles) 
+            if i != 0 and not any(m in str(f).lower() for m in mots_globaux)
+        ]
         
-        if not df_analyse.empty:
-            st.divider()
+        # Composant de sélection à l'écran
+        feuilles_selectionnees = st.multiselect(
+            "Feuilles à inclure dans le calcul du Chiffre d'Affaires :",
+            options=toutes_les_feuilles,
+            default=suggestions
+        )
+        
+        if not feuilles_selectionnees:
+            st.warning("⚠️ Veuillez sélectionner au moins une feuille client pour lancer l'analyse.")
+        else:
+            # 2. Lancement de l'analyse sur la sélection
+            agent = MultiSheetReceivablesAgent()
+            df_analyse, rapport_txt, ca, recov, creance, critique = agent.consolider_et_analyser(dict_onglets, feuilles_selectionnees)
             
-            # KPIs
-            st.header("🎯 1. Indicateurs clés consolidés")
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Chiffre d'Affaires Cumulé", f"{ca:,.2f} SAR")
-            k2.metric("Total Recouvré", f"{recov:,.2f} SAR", delta=f"{(recov/ca*100) if ca > 0 else 0:.1f}% Encaissé")
-            k3.metric("Encours Créances Total", f"{creance:,.2f} SAR")
-            k4.metric("Créances > 3 Mois", f"{critique:,.2f} SAR", delta="Retard Critique", delta_color="inverse")
-            
-            st.divider()
-            
-            # Graphiques
-            st.header("📈 2. Graphiques d'Aide à la Décision")
-            col_g1, col_g2 = st.columns(2)
-            
-            with col_g1:
-                st.subheader("🏆 Top Clients (Par Chiffre d'Affaires)")
-                df_top_ca = df_analyse.groupby('Client')['Chiffre d\'Affaires'].sum().reset_index()
-                df_top_ca = df_top_ca.sort_values(by='Chiffre d\'Affaires', ascending=False).head(10)
-                st.bar_chart(data=df_top_ca, x="Client", y="Chiffre d\'Affaires", color="#29B5E8")
+            if not df_analyse.empty:
+                st.divider()
                 
-            with col_g2:
-                st.subheader("⚠️ Top Risques Clients (Créances Totales)")
-                df_creance_client = df_analyse.groupby('Client')['Créance Totale'].sum().reset_index()
-                df_creance_top = df_creance_client.sort_values(by='Créance Totale', ascending=False).head(10)
-                st.bar_chart(data=df_creance_top, x="Client", y="Créance Totale", color="#FF4B4B")
+                # KPIs
+                st.header("🎯 1. Indicateurs clés consolidés")
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Chiffre d'Affaires Réel", f"{ca:,.2f} DA")
+                k2.metric("Total Recouvré", f"{recov:,.2f} DA", delta=f"{(recov/ca*100) if ca > 0 else 0:.1f}% Encaissé")
+                k3.metric("Encours Créances Total", f"{creance:,.2f} DA")
+                k4.metric("Créances > 3 Mois", f"{critique:,.2f} DA", delta="Retard Critique", delta_color="inverse")
                 
-            st.divider()
-            
-            # Rapport et focus
-            col_t1, col_t2 = st.columns(2)
-            
-            with col_t1:
-                st.subheader("📋 Rapport d'Audit Épuré")
-                st.text_area("", value=rapport_txt, height=350)
-                st.download_button("💾 Exporter le Rapport Complet", data=rapport_txt, file_name="Rapport_Audit_Consolide.txt")
+                st.divider()
                 
-            with col_t2:
-                st.subheader("🚨 Focus : Créances de plus de 3 mois (>90j)")
-                df_affichage = df_analyse.copy()
-                df_affichage['Date Échéance'] = df_affichage['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
+                # Graphiques
+                st.header("📈 2. Graphiques d'Aide à la Décision")
+                col_g1, col_g2 = st.columns(2)
                 
-                df_retard_90j = df_affichage[df_affichage['Créance > 3 Mois'] > 0][['Client', 'Source (Onglet)', 'Date Échéance', 'Jours de Retard', 'Créance > 3 Mois']]
-                if not df_retard_90j.empty:
-                    st.warning(f"L'agent a isolé {len(df_retard_90j)} lignes en alerte critique.")
-                    st.dataframe(df_retard_90j.sort_values(by='Créance > 3 Mois', ascending=False), use_container_width=True)
-                else:
-                    st.success("✅ Aucune ligne ne dépasse les 3 mois d'ancienneté.")
+                with col_g1:
+                    st.subheader("🏆 Top Clients (Par Chiffre d'Affaires)")
+                    df_top_ca = df_analyse.groupby('Client')['Chiffre d\'Affaires'].sum().reset_index()
+                    df_top_ca = df_top_ca.sort_values(by='Chiffre d\'Affaires', ascending=False).head(10)
+                    st.bar_chart(data=df_top_ca, x="Client", y="Chiffre d\'Affaires", color="#29B5E8")
+                    
+                with col_g2:
+                    st.subheader("⚠️ Top Risques Clients (Créances Totales)")
+                    df_creance_client = df_analyse.groupby('Client')['Créance Totale'].sum().reset_index()
+                    df_creance_top = df_creance_client.sort_values(by='Créance Totale', ascending=False).head(10)
+                    st.bar_chart(data=df_creance_top, x="Client", y="Créance Totale", color="#FF4B4B")
+                    
+                st.divider()
+                
+                # Rapport et focus
+                col_t1, col_t2 = st.columns(2)
+                
+                with col_t1:
+                    st.subheader("📋 Rapport d'Audit Modulaire")
+                    st.text_area("", value=rapport_txt, height=350)
+                    st.download_button("💾 Exporter le Rapport Complet", data=rapport_txt, file_name="Rapport_Audit_Consolide.txt")
+                    
+                with col_t2:
+                    st.subheader("🚨 Focus : Créances de plus de 3 mois (>90j)")
+                    df_affichage = df_analyse.copy()
+                    df_affichage['Date Échéance'] = df_affichage['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
+                    
+                    df_retard_90j = df_affichage[df_affichage['Créance > 3 Mois'] > 0][['Client', 'Source (Onglet)', 'Date Échéance', 'Jours de Retard', 'Créance > 3 Mois']]
+                    if not df_retard_90j.empty:
+                        st.warning(f"L'agent a isolé {len(df_retard_90j)} lignes en alerte critique.")
+                        st.dataframe(df_retard_90j.sort_values(by='Créance > 3 Mois', ascending=False), use_container_width=True)
+                    else:
+                        st.success("✅ Aucune ligne ne dépasse les 3 mois d'ancienneté.")
 
-            st.subheader("🔍 Base de Données Consolidée Unique")
-            df_global_view = df_analyse.copy()
-            df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
-            st.dataframe(df_global_view, use_container_width=True)
-            
-    except Exception as e:
-        # CORRECTIF DE LIGNE 189 : Ajout d'une action d'affichage pour éviter l'IndentationError
-        st.error(f"Erreur lors de l'exécution globale : {e}")
+                st.subheader("🔍 Base de Données Consolidée Filtrée")
+                df_global_view = df_analyse.copy()
+                df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
+
