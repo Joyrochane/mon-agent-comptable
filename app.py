@@ -115,7 +115,7 @@ reflètent uniquement l'addition stricte des fiches clients individuelles.
 # --- INTERFACE GRAPHIQUE ---
 st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
 st.title("🏦 AI Multi-Sheet Accounting & Receivables Dashboard")
-st.write("Analyse consolidée des fiches clients. **Les onglets récapitulatifs globaux (Total, Global, Balance...) sont automatiquement détectés et ignorés pour éviter les doublons.**")
+st.write("Analyse consolidée des fiches clients sans doublons.")
 
 fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
 
@@ -126,9 +126,8 @@ if fichier is not None:
         agent = MultiSheetReceivablesAgent()
         df_analyse, rapport_txt, ca, recov, creance, critique, ignores = agent.consolider_et_analyser(dict_onglets)
         
-        # Affichage des feuilles ignorées pour transparence
-        st.warning(f"🚫 Feuilles exclues de l'analyse pour éviter les doublons : {', '.join(ignores)}")
-        st.success(f"✅ Analyse finalisée sur les {len(dict_onglets) - len(ignores)} fiches clients individuelles.")
+        st.warning(f"🚫 Feuilles exclues de l'analyse : {', '.join(ignores)}")
+        st.success(f"✅ Analyse finalisée sur les {len(dict_onglets) - len(ignores)} fiches clients.")
         
         if not df_analyse.empty:
             st.divider()
@@ -187,3 +186,5 @@ if fichier is not None:
             st.dataframe(df_global_view, use_container_width=True)
             
     except Exception as e:
+        # CORRECTIF DE LIGNE 189 : Ajout d'une action d'affichage pour éviter l'IndentationError
+        st.error(f"Erreur lors de l'exécution globale : {e}")
