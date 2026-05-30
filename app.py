@@ -11,11 +11,21 @@ class MultiSheetReceivablesAgent:
         today_pandas = pd.Timestamp.now().normalize()
 
         # Identifier le nom de la première feuille pour l'ignorer
-        nom_premiere_feuille = list(dict_dfs.keys())[0] if dict_dfs else None
+        nom_premiere_feuille = list(dict_dfs.keys()) if dict_dfs else None
+        onglets_ignores = []
 
         for nom_feuille, df_feuille in dict_dfs.items():
-            # Si c'est la première feuille, on passe à la suivante sans la lire
+            nom_clean = str(nom_feuille).lower().strip()
+            
+            # 1. Ignorer la première feuille (Sommaire/Index)
             if nom_feuille == nom_premiere_feuille:
+                onglets_ignores.append(f"{nom_feuille} (Première feuille)")
+                continue
+                
+            # 2. SECOURS ANTI-DOUBLE : Ignorer l'état global / récapitulatif
+            mots_cles_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
+            if any(mot in nom_clean for mot in mots_cles_globaux):
+                onglets_ignores.append(f"{nom_feuille} (État Global détecté)")
                 continue
                 
             if df_feuille.empty:
@@ -66,7 +76,7 @@ class MultiSheetReceivablesAgent:
             liste_df_nettoyes.append(df_calc)
 
         if not liste_df_nettoyes:
-            return pd.DataFrame(), "", 0, 0, 0, 0
+            return pd.DataFrame(), "", 0, 0, 0, 0, onglets_ignores
 
         df_total = pd.concat(liste_df_nettoyes, ignore_index=True)
 
@@ -79,10 +89,11 @@ class MultiSheetReceivablesAgent:
 
         rapport = f"""
 ============================================================
-      RAPPORT D'AUDIT FINANCIER CONSOLIDÉ (MULTI-ONGLETS)
+      RAPPORT D'AUDIT FINANCIER CONSOLIDÉ (FEUILLES CLIENTS)
 ============================================================
 Agent Auditeur    : {self.agent_name}
-Nombre d'onglets  : {len(dict_dfs) - 1} feuilles analysées (Feuille 1 ignorée)
+Nombre d'onglets  : {len(liste_df_nettoyes)} feuilles clients analysées
+Feuilles ignorées : {", ".join(onglets_ignores)}
 Date d'exécution  : {today_pandas.strftime('%d/%m/%Y')}
 Statut Risque     : {"🔴 ALERTE LIQUIDITÉ CRITIQUE" if total_critique_90j > (total_creances * 0.25) else "🟢 RECOUVREMENT SOUS CONTRÔLE"}
 
@@ -95,15 +106,16 @@ SYNTHÈSE DE TOUS LES ÉTATS CLIENTS :
 - Créances Critiques (> 3 mois)   : {total_critique_90j:,.2f} SAR
 
 NOTE ANALYTIQUE :
-Les créances de plus de 3 mois représentent { (total_critique_90j/total_creances*100) if total_creances > 0 else 0:.1f}% de votre encours de trésorerie.
+Les doublons d'états généraux ont été purgés. Les calculs ci-dessus 
+reflètent uniquement l'addition stricte des fiches clients individuelles.
 ============================================================
 """
-        return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j
+        return df_total, rapport, total_ca, total_recouvrement, total_creances, total_critique_90j, onglets_ignores
 
 # --- INTERFACE GRAPHIQUE ---
 st.set_page_config(page_title="AI Multi-Sheet Auditor", page_icon="🏦", layout="wide")
 st.title("🏦 AI Multi-Sheet Accounting & Receivables Dashboard")
-st.write("Analyse consolidée. **Note : La première feuille de calcul de votre fichier Excel est automatiquement ignorée.**")
+st.write("Analyse consolidée des fiches clients. **Les onglets récapitulatifs globaux (Total, Global, Balance...) sont automatiquement détectés et ignorés pour éviter les doublons.**")
 
 fichier = st.file_uploader("Déposez votre fichier Excel Multi-feuilles (.xlsx)", type=["xlsx"])
 
@@ -111,12 +123,12 @@ if fichier is not None:
     try:
         dict_onglets = pd.read_excel(fichier, sheet_name=None)
         
-        # Message d'accueil indiquant l'onglet ignoré
-        nom_premier = list(dict_onglets.keys())[0] if dict_onglets else ""
-        st.success(f"✅ Fichier détecté ! {len(dict_onglets)} feuilles trouvées. L'onglet '{nom_premier}' sera ignoré.")
-        
         agent = MultiSheetReceivablesAgent()
-        df_analyse, rapport_txt, ca, recov, creance, critique = agent.consolider_et_analyser(dict_onglets)
+        df_analyse, rapport_txt, ca, recov, creance, critique, ignores = agent.consolider_et_analyser(dict_onglets)
+        
+        # Affichage des feuilles ignorées pour transparence
+        st.warning(f"🚫 Feuilles exclues de l'analyse pour éviter les doublons : {', '.join(ignores)}")
+        st.success(f"✅ Analyse finalisée sur les {len(dict_onglets) - len(ignores)} fiches clients individuelles.")
         
         if not df_analyse.empty:
             st.divider()
@@ -133,10 +145,10 @@ if fichier is not None:
             
             # Graphiques
             st.header("📈 2. Graphiques d'Aide à la Décision")
-            col_g1, col_g2 = st.columns(2) # <--- CORRIGÉ ICI (Ajout du chiffre 2)
+            col_g1, col_g2 = st.columns(2)
             
             with col_g1:
-                st.subheader("🏆 Top Clients / États (Par Chiffre d'Affaires)")
+                st.subheader("🏆 Top Clients (Par Chiffre d'Affaires)")
                 df_top_ca = df_analyse.groupby('Client')['Chiffre d\'Affaires'].sum().reset_index()
                 df_top_ca = df_top_ca.sort_values(by='Chiffre d\'Affaires', ascending=False).head(10)
                 st.bar_chart(data=df_top_ca, x="Client", y="Chiffre d\'Affaires", color="#29B5E8")
@@ -150,10 +162,10 @@ if fichier is not None:
             st.divider()
             
             # Rapport et focus
-            col_t1, col_t2 = st.columns(2) # <--- CORRIGÉ ICI (Ajout du chiffre 2)
+            col_t1, col_t2 = st.columns(2)
             
             with col_t1:
-                st.subheader("📋 Rapport d'Audit Global")
+                st.subheader("📋 Rapport d'Audit Épuré")
                 st.text_area("", value=rapport_txt, height=350)
                 st.download_button("💾 Exporter le Rapport Complet", data=rapport_txt, file_name="Rapport_Audit_Consolide.txt")
                 
@@ -169,10 +181,9 @@ if fichier is not None:
                 else:
                     st.success("✅ Aucune ligne ne dépasse les 3 mois d'ancienneté.")
 
-            st.subheader("🔍 Base de Données Consolidée")
+            st.subheader("🔍 Base de Données Consolidée Unique")
             df_global_view = df_analyse.copy()
             df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
             st.dataframe(df_global_view, use_container_width=True)
             
     except Exception as e:
-        st.error(f"Erreur d'analyse : {e}")
