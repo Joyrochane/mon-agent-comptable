@@ -185,4 +185,3 @@ if fichier is not None:
                 st.subheader("🔍 Base de Données Consolidée Filtrée")
                 df_global_view = df_analyse.copy()
                 df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
-
