@@ -10,7 +10,7 @@ class MultiSheetReceivablesAgent:
         liste_df_nettoyes = []
         today_pandas = pd.Timestamp.now().normalize()
 
-        # ÉTAPE CLÉ : Identifier le nom de la première feuille pour l'ignorer
+        # Identifier le nom de la première feuille pour l'ignorer
         nom_premiere_feuille = list(dict_dfs.keys())[0] if dict_dfs else None
 
         for nom_feuille, df_feuille in dict_dfs.items():
@@ -133,7 +133,7 @@ if fichier is not None:
             
             # Graphiques
             st.header("📈 2. Graphiques d'Aide à la Décision")
-            col_g1, col_g2 = st.columns(2)
+            col_g1, col_g2 = st.columns(2) # <--- CORRIGÉ ICI (Ajout du chiffre 2)
             
             with col_g1:
                 st.subheader("🏆 Top Clients / États (Par Chiffre d'Affaires)")
@@ -150,7 +150,7 @@ if fichier is not None:
             st.divider()
             
             # Rapport et focus
-            col_t1, col_t2 = st.columns()
+            col_t1, col_t2 = st.columns(2) # <--- CORRIGÉ ICI (Ajout du chiffre 2)
             
             with col_t1:
                 st.subheader("📋 Rapport d'Audit Global")
