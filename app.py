@@ -110,7 +110,7 @@ if fichier is not None:
         st.subheader("⚙️ Configuration du périmètre de consolidation")
         st.info("Cochez uniquement les fiches clients individuelles. Décochez la feuille récapitulative ou globale.")
         
-        # Filtre de pré-sélection intelligent pour aider l'utilisateur (décoche automatiquement la première feuille et les mots "total")
+        # Filtre de pré-sélection intelligent (décoche la première feuille et les mots "total")
         mots_globaux = ['total', 'global', 'synthese', 'synthèse', 'balance', 'recap', 'récap', 'all', 'cumul']
         suggestions = [
             f for i, f in enumerate(toutes_les_feuilles) 
@@ -159,7 +159,7 @@ if fichier is not None:
                     df_creance_client = df_analyse.groupby('Client')['Créance Totale'].sum().reset_index()
                     df_creance_top = df_creance_client.sort_values(by='Créance Totale', ascending=False).head(10)
                     st.bar_chart(data=df_creance_top, x="Client", y="Créance Totale", color="#FF4B4B")
-                    
+                
                 st.divider()
                 
                 # Rapport et focus
@@ -185,3 +185,4 @@ if fichier is not None:
                 st.subheader("🔍 Base de Données Consolidée Filtrée")
                 df_global_view = df_analyse.copy()
                 df_global_view['Date Échéance'] = df_global_view['Date Échéance'].dt.strftime('%d/%m/%Y').fillna('Non spécifiée')
+                st.dataframe(df_global_view, use_container_width=True)
